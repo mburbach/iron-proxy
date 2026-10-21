@@ -772,12 +772,6 @@ iron-proxy generates leaf certificates on the fly, signed by the CA you provide.
 The client container must trust this CA (add it to the system trust store or pass
 it via `--cacert`). Certs are cached in an LRU cache keyed by SNI hostname.
 
-Builds require Go 1.27.3 or later, whose certificate verifier blocks the eight
-compromised eMudhra intermediate CA keys (CVE-2026-111943), including cross-signed
-certificates and chains using custom CA bundles.
-Existing images must be rebuilt and redeployed to receive this protection.
-TLS passthrough connections still depend on the client's certificate verifier.
-
 ## Routing traffic to the proxy
 
 There are three approaches, with increasing enforcement.
