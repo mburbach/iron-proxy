@@ -774,8 +774,7 @@ it via `--cacert`). Certs are cached in an LRU cache keyed by SNI hostname.
 
 Builds require Go 1.27.3 or later, whose certificate verifier blocks the eight
 compromised eMudhra intermediate CA keys (CVE-2026-111943), including cross-signed
-certificates and chains using custom CA bundles. The release image also disables
-the affected emSign ECC G3 and AAA Certificate Services trust anchors.
+certificates and chains using custom CA bundles.
 Existing images must be rebuilt and redeployed to receive this protection.
 TLS passthrough connections still depend on the client's certificate verifier.
 
