@@ -52,6 +52,7 @@ func writePEM(t *testing.T, path, kind string, der []byte) {
 }
 
 type reverseFixture struct {
+	proxy     *Proxy
 	addr      string
 	serverCAs *x509.CertPool
 	client    tls.Certificate
@@ -101,6 +102,7 @@ func startReverseProxy(t *testing.T, transforms []transform.Transformer) reverse
 	serverCAs := x509.NewCertPool()
 	serverCAs.AddCert(serverCA)
 	return reverseFixture{
+		proxy:     p,
 		addr:      ln.Addr().String(),
 		serverCAs: serverCAs,
 		client:    issueCert(t, clientCA, clientCAKey, "worker", x509.ExtKeyUsageClientAuth),
@@ -219,16 +221,25 @@ func TestReverse_TransformsCanReject(t *testing.T) {
 func TestReverse_WebSocketToTLSUpstream(t *testing.T) {
 	upstreamCA, upstreamCAKey := generateTestCA(t)
 	upstreamCert := issueCert(t, upstreamCA, upstreamCAKey, "127.0.0.1", x509.ExtKeyUsageServerAuth)
-	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{upstreamCert}})
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{
+		Certificates: []tls.Certificate{upstreamCert},
+		NextProtos:   []string{"h2", "http/1.1"},
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ln.Close() })
 	paths := make(chan string, 1)
+	protocols := make(chan string, 1)
 	go func() {
 		conn, err := ln.Accept()
 		if err != nil {
 			return
 		}
 		defer conn.Close()
+		tlsConn := conn.(*tls.Conn)
+		if err := tlsConn.Handshake(); err != nil {
+			return
+		}
+		protocols <- tlsConn.ConnectionState().NegotiatedProtocol
 		br := bufio.NewReader(conn)
 		req, err := http.ReadRequest(br)
 		if err != nil {
@@ -242,6 +253,9 @@ func TestReverse_WebSocketToTLSUpstream(t *testing.T) {
 	}()
 
 	f := startReverseProxy(t, nil)
+	// The upstream transport offers h2 once it has served a request; the
+	// WebSocket dial must still negotiate HTTP/1.1.
+	f.proxy.transport.TLSClientConfig.NextProtos = []string{"h2", "http/1.1"}
 	conn, err := tls.Dial("tcp", f.addr, f.tlsConfig(f.client))
 	require.NoError(t, err)
 	defer conn.Close()
@@ -257,6 +271,7 @@ func TestReverse_WebSocketToTLSUpstream(t *testing.T) {
 	resp, err := http.ReadResponse(br, nil)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
+	require.Equal(t, "http/1.1", <-protocols)
 	require.Equal(t, "/v1/responses", <-paths)
 
 	_, err = conn.Write([]byte("hello websocket"))

@@ -811,7 +811,7 @@ func (p *Proxy) handleWebSocket(w http.ResponseWriter, r *http.Request, scheme, 
 		Control:  p.guard.DialControl,
 	}
 	if upstreamScheme == "wss" {
-		upstreamConn, err = tls.DialWithDialer(dialer, "tcp", upstreamHost, p.upstreamTLSConfig())
+		upstreamConn, err = tls.DialWithDialer(dialer, "tcp", upstreamHost, p.websocketTLSConfig())
 	} else {
 		upstreamConn, err = dialer.DialContext(r.Context(), "tcp", upstreamHost)
 	}
@@ -966,13 +966,18 @@ func buildTransport(resolver *net.Resolver, guard *dnsguard.Guard, responseHeade
 	}
 }
 
-// upstreamTLSConfig is the TLS configuration of upstream connections, so
-// WebSockets verify upstreams as HTTP requests do.
-func (p *Proxy) upstreamTLSConfig() *tls.Config {
-	if p.transport.TLSClientConfig == nil {
-		return &tls.Config{MinVersion: tls.VersionTLS12}
+// websocketTLSConfig is the TLS configuration of upstream WebSocket
+// connections: the upstream transport's, so WebSockets verify upstreams as
+// HTTP requests do, offering only HTTP/1.1. The transport adds h2 to its
+// NextProtos once it has served a request, and an upstream that negotiates h2
+// would not understand the HTTP/1.1 upgrade the proxy writes.
+func (p *Proxy) websocketTLSConfig() *tls.Config {
+	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	if p.transport.TLSClientConfig != nil {
+		cfg = p.transport.TLSClientConfig.Clone()
 	}
-	return p.transport.TLSClientConfig.Clone()
+	cfg.NextProtos = []string{"http/1.1"}
+	return cfg
 }
 
 func (p *Proxy) doUpstream(req *http.Request) (*http.Response, error) {
